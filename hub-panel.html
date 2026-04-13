@@ -306,40 +306,29 @@
 
     <script>
         // ─── Supabase Init ───
-        // These will be set from environment or directly here
-        const SUPA_URL = window.__SUPA_URL__ || localStorage.getItem('supa_url') || '';
-        const SUPA_KEY = window.__SUPA_KEY__ || localStorage.getItem('supa_key') || '';
-
-        let supabase = null;
+        const { createClient } = window.supabase;  // Get from CDN
+        let sb = null;
         let currentUser = null;
 
-        // Try to get Supabase config from the server
         async function initSupabase() {
-            // First check if config is available via API
+            if (sb) return true;
             try {
                 const res = await fetch('/api/supabase-config');
                 if (res.ok) {
                     const config = await res.json();
-                    supabase = window.supabase.createClient(config.url, config.key);
+                    sb = createClient(config.url, config.key);
                     return true;
                 }
-            } catch {}
+            } catch (e) { console.warn('Config fetch failed:', e); }
 
-            // Fallback: prompt if no config
-            if (!SUPA_URL || !SUPA_KEY) {
-                const url = prompt('Enter Supabase URL:');
-                const key = prompt('Enter Supabase Anon Key:');
-                if (url && key) {
-                    localStorage.setItem('supa_url', url);
-                    localStorage.setItem('supa_key', key);
-                    supabase = window.supabase.createClient(url, key);
-                    return true;
-                }
-                return false;
+            // Fallback: prompt
+            const url = prompt('Enter Supabase URL:');
+            const key = prompt('Enter Supabase Anon Key:');
+            if (url && key) {
+                sb = createClient(url, key);
+                return true;
             }
-
-            supabase = window.supabase.createClient(SUPA_URL, SUPA_KEY);
-            return true;
+            return false;
         }
 
         // ─── Auth ───
@@ -359,29 +348,35 @@
             btn.textContent = 'Signing in...';
             errEl.style.display = 'none';
 
-            if (!supabase) {
+            try {
                 const ok = await initSupabase();
                 if (!ok) {
-                    errEl.textContent = 'Supabase not configured.';
+                    errEl.textContent = 'Database not configured.';
                     errEl.style.display = 'block';
                     btn.disabled = false;
                     btn.textContent = 'Sign In';
                     return;
                 }
-            }
 
-            const { data, error } = await supabase.auth.signInWithPassword({ email, password: pwd });
+                const { data, error } = await sb.auth.signInWithPassword({ email, password: pwd });
 
-            if (error) {
-                errEl.textContent = error.message || 'Invalid credentials.';
+                if (error) {
+                    errEl.textContent = error.message || 'Invalid credentials.';
+                    errEl.style.display = 'block';
+                    btn.disabled = false;
+                    btn.textContent = 'Sign In';
+                    return;
+                }
+
+                currentUser = data.user;
+                showDashboard();
+            } catch (err) {
+                console.error('Login error:', err);
+                errEl.textContent = 'Connection error: ' + err.message;
                 errEl.style.display = 'block';
                 btn.disabled = false;
                 btn.textContent = 'Sign In';
-                return;
             }
-
-            currentUser = data.user;
-            showDashboard();
         }
 
         function showDashboard() {
@@ -392,7 +387,7 @@
         }
 
         async function logout() {
-            if (supabase) await supabase.auth.signOut();
+            if (sb) await sb.auth.signOut();
             currentUser = null;
             document.getElementById('login-screen').classList.remove('hidden');
             document.getElementById('dashboard').classList.remove('active');
@@ -414,7 +409,7 @@
             empty.style.display = 'none';
 
             try {
-                const { data: records, error } = await supabase
+                const { data: records, error } = await sb
                     .from('activations')
                     .select('*')
                     .order('created_at', { ascending: false })
@@ -485,7 +480,7 @@
             const ok = await initSupabase();
             if (!ok) return;
 
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await sb.auth.getSession();
             if (session?.user) {
                 currentUser = session.user;
                 showDashboard();
