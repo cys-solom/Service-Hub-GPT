@@ -267,7 +267,81 @@ async function checkCDK() {
     setLoading(checkBtn, false);
 }
 
-// ─── Step 2: Auth Method Toggle ────────────────
+// ─── Token Validation & Account Info ─────────────
+function decodeJWT(token) {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return null;
+        // Base64url decode the payload
+        const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        return JSON.parse(atob(payload));
+    } catch { return null; }
+}
+
+function validateAndShowToken(raw) {
+    const accountInfo = document.getElementById('account-info');
+    const accountEmail = document.getElementById('account-email');
+    const accountName = document.getElementById('account-name');
+    const accountPlan = document.getElementById('account-plan');
+
+    accountInfo.classList.add('hidden');
+
+    // 1. Parse JSON
+    let session;
+    try {
+        session = JSON.parse(raw);
+    } catch {
+        return { valid: false, error: 'Invalid JSON format. Please paste the full session response from chatgpt.com/api/auth/session' };
+    }
+
+    // 2. Check required fields
+    if (!session.accessToken) {
+        return { valid: false, error: 'Missing "accessToken" field. Make sure you copied the full response from chatgpt.com/api/auth/session' };
+    }
+
+    if (!session.user || !session.user.email) {
+        return { valid: false, error: 'Missing user email. The session token appears incomplete or corrupted.' };
+    }
+
+    // 3. Decode JWT to get plan info
+    const jwt = decodeJWT(session.accessToken);
+    let currentPlan = 'Free';
+
+    if (jwt) {
+        // Check for token expiration
+        if (jwt.exp && jwt.exp * 1000 < Date.now()) {
+            return { valid: false, error: 'Session token has expired. Please get a fresh token from chatgpt.com/api/auth/session' };
+        }
+
+        // Extract plan from JWT claims
+        // OpenAI uses various claim formats
+        if (jwt['https://api.openai.com/profile']) {
+            const profile = jwt['https://api.openai.com/profile'];
+            if (profile.plan) currentPlan = profile.plan;
+        }
+        if (jwt['https://api.openai.com/auth']) {
+            const auth = jwt['https://api.openai.com/auth'];
+            if (auth.plan) currentPlan = auth.plan;
+        }
+
+        // Check scopes for plan hints
+        const scopes = jwt.scope || '';
+        if (scopes.includes('model.request.gpt-4')) {
+            currentPlan = 'Plus / Team';
+        } else if (scopes.includes('model.request')) {
+            currentPlan = 'Free';
+        }
+    }
+
+    // 4. Show account info
+    accountEmail.textContent = session.user.email;
+    accountName.textContent = session.user.name || session.user.email.split('@')[0];
+    accountPlan.textContent = currentPlan;
+    accountInfo.classList.remove('hidden');
+
+    return { valid: true, session, email: session.user.email, plan: currentPlan };
+}
+
 // ─── Step 2: Activate ──────────────────────────
 async function activate() {
     const raw = sessionInput.value.trim();
@@ -276,12 +350,10 @@ async function activate() {
         return;
     }
 
-    let userPayload;
-    try {
-        JSON.parse(raw);
-        userPayload = raw;
-    } catch {
-        showAlert(sessionAlert, 'error', 'Invalid JSON format. Please paste the full session response.');
+    // Validate token
+    const tokenResult = validateAndShowToken(raw);
+    if (!tokenResult.valid) {
+        showAlert(sessionAlert, 'error', tokenResult.error);
         return;
     }
 
@@ -289,32 +361,52 @@ async function activate() {
     setLoading(activateBtn, true);
 
     try {
+        console.log('[ACTIVATE] Sending activation request...');
         const data = await apiPost('/cdk-activation/outstock', {
             cdk: cdkCode,
-            user: userPayload,
+            user: raw,
         });
+        console.log('[ACTIVATE] Response:', JSON.stringify(data));
 
+        // Handle specific error responses from API
         if (data.message && !data.task_id && !data.success) {
-            showAlert(sessionAlert, 'error', data.message);
+            const msg = data.message.toLowerCase();
+            let userMsg = data.message;
+            
+            // Translate common API errors
+            if (msg.includes('session') && msg.includes('invalid')) {
+                userMsg = 'Session token is invalid or expired. Please get a fresh token from chatgpt.com/api/auth/session';
+            } else if (msg.includes('already') || msg.includes('activated') || msg.includes('used')) {
+                userMsg = 'This code has already been used for activation.';
+            } else if (msg.includes('not found') || msg.includes('invalid code')) {
+                userMsg = 'Invalid CDK code. Please check and try again.';
+            }
+            
+            showAlert(sessionAlert, 'error', userMsg);
             setLoading(activateBtn, false);
             return;
         }
 
-        // Move to step 3
+        // Move to step 3 (progress)
         goToStep(3);
 
         if (data.task_id) {
-            // Async - start polling
+            // Async activation — poll for status
+            console.log('[ACTIVATE] Async task started:', data.task_id);
             startPolling(data.task_id);
-        } else if (data.success) {
+        } else if (data.pending === false && data.success === true) {
             // Immediate success
             showSuccess(data);
         } else if (data.pending === false && data.success === false) {
             // Immediate failure
             showFailed(data.message || 'Activation failed.');
+        } else if (data.success === true) {
+            // Success without pending field
+            showSuccess(data);
         } else {
-            // Unknown response, treat as pending with task_id = cdkCode
-            startPolling(cdkCode);
+            // Unknown response format — try polling with the CDK code
+            console.warn('[ACTIVATE] Unknown response format, trying poll:', data);
+            startPolling(data.task_id || cdkCode);
         }
 
     } catch (err) {
@@ -536,6 +628,7 @@ function resetAll() {
 
     hideAlert(cdkAlert);
     hideAlert(sessionAlert);
+    document.getElementById('account-info').classList.add('hidden');
     cdkInfo.classList.add('hidden');
     checkBtn.classList.remove('hidden');
     nextStep2Btn.classList.add('hidden');
@@ -576,7 +669,25 @@ backStep1Btn.addEventListener('click', () => {
     }
 });
 
-
+// Auto-validate session token on paste/input
+let tokenDebounce = null;
+sessionInput.addEventListener('input', () => {
+    clearTimeout(tokenDebounce);
+    const raw = sessionInput.value.trim();
+    if (!raw) {
+        document.getElementById('account-info').classList.add('hidden');
+        hideAlert(sessionAlert);
+        return;
+    }
+    tokenDebounce = setTimeout(() => {
+        const result = validateAndShowToken(raw);
+        if (!result.valid) {
+            showAlert(sessionAlert, 'error', result.error);
+        } else {
+            hideAlert(sessionAlert);
+        }
+    }, 500);
+});
 
 activateBtn.addEventListener('click', activate);
 
