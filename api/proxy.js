@@ -16,36 +16,52 @@ module.exports = async (req, res) => {
         return res.status(400).json({ message: 'Missing path parameter' });
     }
 
-    const bodyStr = req.body ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body)) : '';
+    const isGet = req.method === 'GET';
+
+    // For POST: stringify body. For GET: no body at all
+    let bodyStr = '';
+    if (!isGet && req.body) {
+        bodyStr = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    }
 
     return new Promise((resolve) => {
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Origin': 'https://ai-redeem.cc',
+            'Referer': 'https://ai-redeem.cc/',
+        };
+
+        // Only set Content-Type and Content-Length for POST requests
+        if (!isGet) {
+            headers['Content-Type'] = 'application/json';
+            headers['Content-Length'] = Buffer.byteLength(bodyStr);
+        }
+
         const options = {
             hostname: 'ai-redeem.cc',
             port: 443,
             path: targetPath,
             method: req.method,
-            headers: {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(bodyStr),
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/json, text/plain, */*',
-                'Origin': 'https://ai-redeem.cc',
-                'Referer': 'https://ai-redeem.cc/',
-            },
+            headers,
         };
+
+        console.log(`[PROXY] ${req.method} ${targetPath}`);
 
         const proxyReq = https.request(options, (proxyRes) => {
             let data = '';
             proxyRes.on('data', chunk => data += chunk);
             proxyRes.on('end', () => {
+                console.log(`[PROXY] Response ${proxyRes.statusCode}: ${data.substring(0, 200)}`);
                 res.status(proxyRes.statusCode)
-                   .setHeader('Content-Type', 'application/json')
+                   .setHeader('Content-Type', proxyRes.headers['content-type'] || 'application/json')
                    .send(data);
                 resolve();
             });
         });
 
         proxyReq.on('error', (err) => {
+            console.error(`[PROXY] Error: ${err.message}`);
             res.status(502).json({ message: 'Proxy error: ' + err.message });
             resolve();
         });
@@ -56,7 +72,7 @@ module.exports = async (req, res) => {
             resolve();
         });
 
-        if (bodyStr) proxyReq.write(bodyStr);
+        if (!isGet && bodyStr) proxyReq.write(bodyStr);
         proxyReq.end();
     });
 };
