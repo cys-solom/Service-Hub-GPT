@@ -78,20 +78,23 @@ function isRealApiResponse(json) {
 }
 
 async function fetchFromUrl(url, options, isProxy = false) {
-    const res = await fetch(url, options);
+    // Add timeout to each request
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timeout);
+
     const text = await res.text();
     let json;
     try { json = JSON.parse(text); } catch { json = null; }
 
     if (isProxy) {
-        // For CORS proxies: ONLY accept 200 OK with valid API JSON
         if (!res.ok) throw new Error(`Proxy returned HTTP ${res.status}`);
         if (!json) throw new Error('Proxy returned non-JSON');
         if (!isRealApiResponse(json)) throw new Error(`Proxy error: ${json.message || text.substring(0, 100)}`);
         return json;
     }
 
-    // For direct/Vercel proxy: accept any JSON response (even error codes)
     if (json && isRealApiResponse(json)) return json;
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     if (!json) throw new Error('Non-JSON response');
@@ -107,37 +110,35 @@ async function apiRequest(method, endpoint, body = null) {
         fetchOpts.body = JSON.stringify(body);
     }
 
-    // Build ordered list of attempts
-    const attempts = [];
-
-    // If we already know what works, try that first
+    // If we already know what works, try ONLY that (fast path for polling)
     if (workingMethod) {
         const saved = buildAttempt(workingMethod, endpoint);
-        if (saved) attempts.push(saved);
+        if (saved) {
+            try {
+                const data = await fetchFromUrl(saved.url, fetchOpts, saved.isProxy);
+                return data;
+            } catch (err) {
+                console.warn(`[API] Cached method ${workingMethod} failed:`, err.message);
+                workingMethod = null; // Reset and try all
+            }
+        }
     }
 
-    // Then add all methods: proxy first (works on localhost + Vercel), then direct, then CORS
-    attempts.push({ label: 'proxy', url: `${PROXY_PREFIX}${endpoint}`, isProxy: false });
-    attempts.push({ label: 'direct', url: `${DIRECT_API}${endpoint}`, isProxy: false });
+    // Try all methods: proxy first, then direct, then CORS
+    const attempts = [
+        { label: 'proxy', url: `${PROXY_PREFIX}${endpoint}`, isProxy: false },
+        { label: 'direct', url: `${DIRECT_API}${endpoint}`, isProxy: false },
+    ];
     CORS_PROXIES.forEach((p, i) => {
         attempts.push({ label: `cors-${i}`, url: `${p}${encodeURIComponent(`${DIRECT_API}${endpoint}`)}`, isProxy: true });
     });
 
-    // Deduplicate by label
-    const seen = new Set();
-    const uniqueAttempts = attempts.filter(a => {
-        if (seen.has(a.label)) return false;
-        seen.add(a.label);
-        return true;
-    });
-
     let lastError = null;
-    for (const attempt of uniqueAttempts) {
+    for (const attempt of attempts) {
         try {
             console.log(`[API] Trying ${attempt.label}...`);
             const data = await fetchFromUrl(attempt.url, fetchOpts, attempt.isProxy);
             workingMethod = attempt.label;
-            console.log(`[API] ✓ Success via ${attempt.label}`);
             return data;
         } catch (err) {
             console.warn(`[API] ✗ ${attempt.label}:`, err.message);
@@ -426,18 +427,57 @@ function showSuccess(data) {
 
     successMessage.textContent = data.message || 'Your subscription has been activated successfully.';
 
-    // Build details
-    let detailsHTML = '';
-    if (data.key) {
-        detailsHTML += `<p><span>Plan</span><span>${(data.key.plan || cdkData?.key?.plan || '—').toUpperCase()}</span></p>`;
-        detailsHTML += `<p><span>Email</span><span>${data.key.activated_email || '—'}</span></p>`;
-        detailsHTML += `<p><span>Type</span><span>${data.activation_type === 'new' ? 'New Activation' : data.activation_type === 'renew' ? 'Renewal' : (data.activation_type || '—')}</span></p>`;
-        detailsHTML += `<p><span>Status</span><span style="color: var(--accent)">${data.key.status || 'Activated'}</span></p>`;
+    // Extract email from multiple sources
+    let email = data.key?.activated_email || '';
+    if (!email && data.message) {
+        const m = data.message.match(/[\w.-]+@[\w.-]+\.\w+/);
+        if (m) email = m[0];
     }
+    if (!email) {
+        try {
+            const s = JSON.parse(sessionInput.value.trim());
+            email = s.user?.email || s.email || '';
+        } catch {}
+    }
+
+    // Get plan info from response or initial check data
+    const plan = (data.key?.plan || cdkData?.key?.plan || '').toUpperCase();
+    const term = data.key?.term || cdkData?.key?.term || '';
+    const hours = data.key?.subscription_hours || cdkData?.key?.subscription_hours || 0;
+    const duration = getDuration(term, hours);
+    const type = data.activation_type === 'new' ? 'New Activation' 
+               : data.activation_type === 'renew' ? 'Renewal' 
+               : (data.activation_type || 'Activation');
+
+    let detailsHTML = '';
+    if (plan) detailsHTML += `<p><span>Plan</span><span>${plan}</span></p>`;
+    if (email) detailsHTML += `<p><span>Email</span><span>${email}</span></p>`;
+    if (duration) detailsHTML += `<p><span>Duration</span><span>${duration}</span></p>`;
+    detailsHTML += `<p><span>Type</span><span>${type}</span></p>`;
+    detailsHTML += `<p><span>Status</span><span style="color: var(--accent)">✓ Activated</span></p>`;
     successDetails.innerHTML = detailsHTML;
 
-    // ─── Log activation to database + Telegram ───
+    // Log activation to database + Telegram
     logActivation(data);
+}
+
+function getDuration(term, hours) {
+    if (term) {
+        if (term.includes('30d') || term.includes('1m')) return '1 Month';
+        if (term.includes('60d') || term.includes('2m')) return '2 Months';
+        if (term.includes('90d') || term.includes('3m')) return '3 Months';
+        if (term.includes('180d') || term.includes('6m')) return '6 Months';
+        if (term.includes('365d') || term.includes('1y') || term.includes('12m')) return '1 Year';
+        if (term.includes('7d') || term.includes('1w')) return '1 Week';
+        const days = parseInt(term);
+        if (days) return `${days} Days`;
+    }
+    if (hours) {
+        if (hours >= 720) return `${Math.round(hours / 720)} Month${hours >= 1440 ? 's' : ''}`;
+        if (hours >= 168) return `${Math.round(hours / 168)} Week${hours >= 336 ? 's' : ''}`;
+        return `${Math.round(hours / 24)} Days`;
+    }
+    return '';
 }
 
 function logActivation(data) {
