@@ -1,12 +1,18 @@
 {
     "builds": [
-        { "src": "api/*.js", "use": "@vercel/node" },
+        { "src": "api/proxy.js", "use": "@vercel/node" },
+        { "src": "api/log-activation.js", "use": "@vercel/node" },
+        { "src": "api/get-activations.js", "use": "@vercel/node" },
+        { "src": "api/supabase-config.js", "use": "@vercel/node" },
         { "src": "*.html", "use": "@vercel/static" },
         { "src": "*.css", "use": "@vercel/static" },
         { "src": "*.js", "use": "@vercel/static" }
     ],
     "routes": [
-        { "src": "/api/(.*)", "dest": "/api/$1" },
+        { "src": "/api/proxy", "dest": "/api/proxy.js" },
+        { "src": "/api/log-activation", "dest": "/api/log-activation.js" },
+        { "src": "/api/get-activations", "dest": "/api/get-activations.js" },
+        { "src": "/api/supabase-config", "dest": "/api/supabase-config.js" },
         { "src": "/(.*)", "dest": "/$1" }
     ]
 }
