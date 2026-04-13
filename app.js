@@ -14,7 +14,7 @@
 // On Vercel: /api/* is proxied to ai-redeem.cc (no CORS issues)
 // Locally or elsewhere: falls back to direct API + CORS proxies
 const DIRECT_API = 'https://ai-redeem.cc';
-const PROXY_PREFIX = '/api';  // Vercel rewrites (vercel.json)
+const PROXY_PREFIX = '/api/proxy?path=';  // Vercel serverless function
 
 const CORS_PROXIES = [
     'https://corsproxy.io/?',
