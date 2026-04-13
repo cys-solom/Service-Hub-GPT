@@ -180,10 +180,15 @@
                     </div>
 
                     <!-- Account Info Preview (shown after valid token) -->
-                    <div class="cdk-info hidden" id="account-info" style="margin-bottom:16px">
-                        <p><span>📧 Email</span><span id="account-email">—</span></p>
-                        <p><span>👤 Name</span><span id="account-name">—</span></p>
-                        <p><span>📋 Current Plan</span><span id="account-plan">—</span></p>
+                    <div class="hidden" id="account-info" style="margin-bottom:16px; background:rgba(77,166,255,0.04); border:1px solid rgba(77,166,255,0.15); border-radius:14px; padding:18px 20px; display:flex; gap:16px; flex-wrap:wrap;">
+                        <div style="flex:1; min-width:180px;">
+                            <div style="font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text3); font-weight:600; margin-bottom:6px;">📧 Account Email</div>
+                            <div id="account-email" style="font-size:0.92rem; font-weight:600; color:var(--accent); word-break:break-all;">—</div>
+                        </div>
+                        <div style="min-width:140px;">
+                            <div style="font-size:0.68rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text3); font-weight:600; margin-bottom:6px;">📋 Current Plan</div>
+                            <div id="account-plan" style="font-size:0.92rem; font-weight:700;">—</div>
+                        </div>
                     </div>
 
                     <div class="alert hidden" id="session-alert"></div>

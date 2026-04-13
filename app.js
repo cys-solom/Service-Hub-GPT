@@ -277,59 +277,100 @@ function decodeJWT(token) {
     } catch { return null; }
 }
 
-function detectPlanFromJWT(jwt) {
-    if (!jwt) return { plan: 'Free', isWorkspace: false };
+function normalizePlanName(raw) {
+    if (!raw) return null;
+    const s = String(raw).toLowerCase().trim();
+    if (s.includes('chatgptpro') || s === 'pro') return 'Pro';
+    if (s.includes('chatgptplus') || s.includes('plus')) return 'Plus';
+    if (s.includes('team')) return 'Team';
+    if (s.includes('enterprise')) return 'Enterprise';
+    if (s.includes('free') || s === '' || s === 'none') return 'Free';
+    // Return capitalized if unknown
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
 
-    let plan = 'Free';
+function extractPlanFromSession(session, jwt) {
+    let plan = null;
     let isWorkspace = false;
 
-    // Check OpenAI profile/auth claims
-    const profile = jwt['https://api.openai.com/profile'] || {};
-    const auth = jwt['https://api.openai.com/auth'] || {};
+    // ── 1. Check session.accounts (newest format) ──
+    // Structure: session.accounts = { "acc-id": { account: { plan_type: "..." }, ... } }
+    if (session.accounts && typeof session.accounts === 'object') {
+        for (const key of Object.keys(session.accounts)) {
+            const acc = session.accounts[key];
+            if (acc?.account?.plan_type) {
+                plan = normalizePlanName(acc.account.plan_type);
+            }
+            if (acc?.account?.account_user_role === 'member' || 
+                acc?.account?.structure === 'workspace' ||
+                acc?.account?.is_org_account === true) {
+                isWorkspace = true;
+            }
+            // Check entitlement
+            if (acc?.entitlement?.plan) {
+                plan = normalizePlanName(acc.entitlement.plan);
+            }
+            if (acc?.features && Array.isArray(acc.features)) {
+                if (acc.features.includes('workspace')) isWorkspace = true;
+            }
+        }
+    }
 
-    // Detect workspace/team/enterprise
-    if (auth.organization_id || auth.org_id || auth.workspace_id) {
+    // ── 2. Check session.account (older format) ──
+    if (!plan && session.account) {
+        if (session.account.plan_type) plan = normalizePlanName(session.account.plan_type);
+        if (session.account.planType) plan = normalizePlanName(session.account.planType);
+        if (session.account.plan) plan = normalizePlanName(session.account.plan);
+    }
+
+    // ── 3. Check session-level plan fields ──
+    if (!plan && session.accountPlan) plan = normalizePlanName(session.accountPlan);
+    if (!plan && session.plan_type) plan = normalizePlanName(session.plan_type);
+    if (!plan && session.plan) plan = normalizePlanName(session.plan);
+
+    // ── 4. Check JWT claims ──
+    if (jwt) {
+        const profile = jwt['https://api.openai.com/profile'] || {};
+        const auth = jwt['https://api.openai.com/auth'] || {};
+
+        // Workspace detection from JWT
+        if (auth.organization_id || auth.org_id || auth.workspace_id) isWorkspace = true;
+        if (profile.organization_id || profile.org_id) isWorkspace = true;
+
+        // Plan from JWT claims
+        if (!plan && auth.plan) plan = normalizePlanName(auth.plan);
+        if (!plan && profile.plan) plan = normalizePlanName(profile.plan);
+
+        // Scopes-based detection
+        if (!plan) {
+            const scopes = jwt.scope || '';
+            if (scopes.includes('model.request.gpt-4')) {
+                plan = 'Plus';
+            }
+        }
+
+        // Audience-based workspace detection
+        const aud = Array.isArray(jwt.aud) ? jwt.aud : [jwt.aud || ''];
+        if (aud.some(a => a && (a.includes('workspace') || a.includes('enterprise') || a.includes('team')))) {
+            isWorkspace = true;
+        }
+    }
+
+    // ── 5. Check user groups for workspace ──
+    const groups = session.user?.groups || [];
+    if (groups.some(g => typeof g === 'string' && (g.includes('team') || g.includes('workspace') || g.includes('enterprise')))) {
         isWorkspace = true;
     }
-    if (profile.organization_id || profile.org_id) {
-        isWorkspace = true;
-    }
 
-    // Check audience for workspace indicators
-    const aud = Array.isArray(jwt.aud) ? jwt.aud : [jwt.aud || ''];
-    if (aud.some(a => a && (a.includes('workspace') || a.includes('enterprise') || a.includes('team')))) {
-        isWorkspace = true;
-    }
+    // Normalize workspace plans
+    if (plan === 'Team' || plan === 'Enterprise') isWorkspace = true;
 
-    // Check scopes for plan hints
-    const scopes = jwt.scope || '';
-    if (scopes.includes('model.request.gpt-4')) {
-        plan = 'Plus';
-    }
-    // More specific plan detection from claims
-    if (auth.plan) plan = auth.plan;
-    if (profile.plan) plan = profile.plan;
-
-    // Normalize plan name
-    const planLower = plan.toLowerCase();
-    if (planLower.includes('team') || planLower.includes('enterprise')) {
-        isWorkspace = true;
-        plan = 'Team / Enterprise';
-    } else if (planLower.includes('plus')) {
-        plan = 'Plus';
-    } else if (planLower.includes('pro')) {
-        plan = 'Pro';
-    } else if (planLower === 'free' || planLower === '') {
-        plan = 'Free';
-    }
-
-    return { plan, isWorkspace };
+    return { plan: plan || 'Free', isWorkspace };
 }
 
 function validateAndShowToken(raw) {
     const accountInfo = document.getElementById('account-info');
     const accountEmail = document.getElementById('account-email');
-    const accountName = document.getElementById('account-name');
     const accountPlan = document.getElementById('account-plan');
 
     accountInfo.classList.add('hidden');
@@ -351,45 +392,38 @@ function validateAndShowToken(raw) {
         return { valid: false, error: 'Missing user email. The session token appears incomplete or corrupted.' };
     }
 
-    // 3. Decode JWT
+    // 3. Decode JWT & check expiration
     const jwt = decodeJWT(session.accessToken);
-
-    if (jwt) {
-        // Check expiration
-        if (jwt.exp && jwt.exp * 1000 < Date.now()) {
-            return { valid: false, error: 'Session token has expired. Please get a fresh token from chatgpt.com/api/auth/session' };
-        }
+    if (jwt && jwt.exp && jwt.exp * 1000 < Date.now()) {
+        return { valid: false, error: 'Session token has expired. Please get a fresh token from chatgpt.com/api/auth/session' };
     }
 
-    // 4. Detect plan and workspace
-    const { plan: currentPlan, isWorkspace } = detectPlanFromJWT(jwt);
+    // 4. Extract plan from ALL possible locations
+    const { plan: currentPlan, isWorkspace } = extractPlanFromSession(session, jwt);
 
-    // Also check session-level workspace indicators
-    const userGroups = session.user?.groups || [];
-    const hasWorkspaceGroup = userGroups.some(g => 
-        typeof g === 'string' && (g.includes('team') || g.includes('workspace') || g.includes('enterprise'))
-    );
+    console.log('[TOKEN] Email:', session.user.email, '| Plan:', currentPlan, '| Workspace:', isWorkspace);
 
-    if (isWorkspace || hasWorkspaceGroup) {
+    // 5. Block workspace accounts
+    if (isWorkspace) {
         return { 
             valid: false, 
             error: '⚠️ Workspace / Team accounts are not supported. Please use a personal ChatGPT account for activation.' 
         };
     }
 
-    // 5. Show account info
+    // 6. Show account info
     accountEmail.textContent = session.user.email;
-    accountName.textContent = session.user.name || session.user.email.split('@')[0];
     accountPlan.textContent = currentPlan;
 
-    // Color the plan badge
-    const planEl = accountPlan;
+    // Style the plan text
     if (currentPlan === 'Plus') {
-        planEl.style.color = 'var(--accent2)';
+        accountPlan.style.color = '#FFA726';
     } else if (currentPlan === 'Pro') {
-        planEl.style.color = '#a855f7';
+        accountPlan.style.color = '#a855f7';
+    } else if (currentPlan === 'Free') {
+        accountPlan.style.color = '#8b8b9e';
     } else {
-        planEl.style.color = 'var(--text2)';
+        accountPlan.style.color = 'var(--accent)';
     }
 
     accountInfo.classList.remove('hidden');
