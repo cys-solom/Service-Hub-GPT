@@ -423,6 +423,42 @@ function showSuccess(data) {
         detailsHTML += `<p><span>Status</span><span style="color: var(--accent)">${data.key.status || 'Activated'}</span></p>`;
     }
     successDetails.innerHTML = detailsHTML;
+
+    // ─── Log activation to database + Telegram ───
+    logActivation(data);
+}
+
+function logActivation(data) {
+    // Extract email from: activation response, session token, or email input
+    let email = data.key?.activated_email || '';
+    if (!email && authMethod === 'session') {
+        try {
+            const session = JSON.parse(sessionInput.value.trim());
+            email = session.user?.email || '';
+        } catch {}
+    }
+    if (!email && authMethod === 'email') {
+        email = emailInput.value.trim();
+    }
+
+    const payload = {
+        email: email || 'unknown',
+        code: cdkCode,
+        plan: data.key?.plan || cdkData?.key?.plan || cdkData?.app_name || '',
+        activation_type: data.activation_type || '',
+        status: data.key?.status || 'activated',
+    };
+
+    // Fire and forget — don't block UI
+    fetch('/api/log-activation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    }).then(r => {
+        console.log('[LOG] Activation logged:', r.ok);
+    }).catch(err => {
+        console.warn('[LOG] Failed to log:', err.message);
+    });
 }
 
 function showFailed(message) {

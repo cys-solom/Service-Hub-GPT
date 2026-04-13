@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Hub — Admin Panel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #080e1f;
+            --bg-card: rgba(13, 21, 41, 0.85);
+            --border: rgba(255,255,255,0.06);
+            --text: #f0f0f5;
+            --text2: #8b8b9e;
+            --text3: #5e5e72;
+            --accent: #4DA6FF;
+            --accent2: #FFA726;
+            --error: #ef4444;
+            --success: #4DA6FF;
+            --font: 'Inter', -apple-system, sans-serif;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Login Screen */
+        .login-screen {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .login-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+
+        .login-card h1 {
+            font-size: 1.4rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .login-card p {
+            color: var(--text2);
+            font-size: 0.85rem;
+            margin-bottom: 24px;
+        }
+
+        .login-card input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(255,255,255,0.04);
+            border: 1.5px solid var(--border);
+            border-radius: 12px;
+            color: var(--text);
+            font-family: var(--font);
+            font-size: 0.95rem;
+            outline: none;
+            margin-bottom: 16px;
+        }
+
+        .login-card input:focus {
+            border-color: rgba(77,166,255,0.5);
+            box-shadow: 0 0 0 3px rgba(77,166,255,0.08);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #2B8AE6, #4DA6FF);
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            font-family: var(--font);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.25s ease;
+        }
+
+        .btn:hover { box-shadow: 0 6px 24px rgba(77,166,255,0.4); transform: translateY(-1px); }
+
+        .login-error {
+            color: var(--error);
+            font-size: 0.82rem;
+            margin-bottom: 12px;
+            display: none;
+        }
+
+        /* Dashboard */
+        .dashboard { display: none; }
+        .dashboard.active { display: block; }
+        .login-screen.hidden { display: none; }
+
+        .dash-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            backdrop-filter: blur(20px);
+            background: rgba(8,14,31,0.8);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .dash-header h1 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .dash-header h1 span { color: var(--accent); }
+
+        .dash-logout {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border);
+            color: var(--text2);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-family: var(--font);
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .dash-logout:hover { color: var(--error); border-color: rgba(239,68,68,0.3); }
+
+        .dash-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 28px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            backdrop-filter: blur(12px);
+        }
+
+        .stat-label { font-size: 0.75rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+        .stat-value { font-size: 1.8rem; font-weight: 800; margin-top: 8px; color: var(--accent); }
+        .stat-value.orange { color: var(--accent2); }
+
+        /* Table */
+        .table-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+            backdrop-filter: blur(12px);
+        }
+
+        .table-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .table-header h2 { font-size: 1rem; font-weight: 700; }
+
+        .table-refresh {
+            background: rgba(77,166,255,0.1);
+            border: 1px solid rgba(77,166,255,0.2);
+            color: var(--accent);
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-family: var(--font);
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .table-refresh:hover { background: rgba(77,166,255,0.2); }
+
+        .table-wrapper { overflow-x: auto; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.02);
+            color: var(--text3);
+            font-weight: 600;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+        }
+
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text2);
+            white-space: nowrap;
+        }
+
+        tr:hover td { background: rgba(255,255,255,0.02); }
+
+        .email-cell { color: var(--accent); font-weight: 500; }
+        .code-cell { font-family: monospace; color: var(--accent2); font-size: 0.8rem; }
+        .status-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+        .status-badge.success {
+            background: rgba(77,166,255,0.1);
+            color: var(--accent);
+            border: 1px solid rgba(77,166,255,0.2);
+        }
+
+        .empty-state {
+            padding: 60px 20px;
+            text-align: center;
+            color: var(--text3);
+        }
+
+        .empty-state svg { opacity: 0.3; margin-bottom: 16px; }
+        .empty-state p { font-size: 0.9rem; }
+
+        /* Loading */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: var(--text3);
+            gap: 10px;
+        }
+
+        .spin { animation: spin 0.8s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        @media (max-width: 640px) {
+            .dash-content { padding: 16px; }
+            .stats-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+            .stat-card { padding: 14px; }
+            .stat-value { font-size: 1.4rem; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div class="login-screen" id="login-screen">
+        <div class="login-card">
+            <h1>🔒 Admin Panel</h1>
+            <p>Enter your admin password to access the dashboard.</p>
+            <div class="login-error" id="login-error">Invalid password</div>
+            <input type="password" id="password-input" placeholder="Enter password" autofocus>
+            <button class="btn" id="login-btn" onclick="login()">Login</button>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="dashboard" id="dashboard">
+        <div class="dash-header">
+            <h1>⚡ Service<span>Hub</span> Admin</h1>
+            <button class="dash-logout" onclick="logout()">Logout</button>
+        </div>
+
+        <div class="dash-content">
+            <!-- Stats -->
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Total Activations</div>
+                    <div class="stat-value" id="stat-total">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Today</div>
+                    <div class="stat-value orange" id="stat-today">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Unique Emails</div>
+                    <div class="stat-value" id="stat-emails">—</div>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="table-card">
+                <div class="table-header">
+                    <h2>Activation Records</h2>
+                    <button class="table-refresh" onclick="loadRecords()">↻ Refresh</button>
+                </div>
+                <div class="table-wrapper">
+                    <div class="loading" id="table-loading">
+                        <svg class="spin" width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="30 70" stroke-linecap="round"/></svg>
+                        Loading...
+                    </div>
+                    <table id="records-table" style="display:none">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Email</th>
+                                <th>Code</th>
+                                <th>Plan</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Date & Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="records-body"></tbody>
+                    </table>
+                    <div class="empty-state" id="empty-state" style="display:none">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+                        <p>No activation records yet.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let adminPassword = '';
+
+        function login() {
+            const pwd = document.getElementById('password-input').value.trim();
+            if (!pwd) return;
+
+            adminPassword = pwd;
+
+            // Test password by fetching records
+            fetch(`/api/get-activations?password=${encodeURIComponent(pwd)}&limit=1`)
+                .then(r => {
+                    if (r.status === 401) {
+                        document.getElementById('login-error').style.display = 'block';
+                        adminPassword = '';
+                        return;
+                    }
+                    document.getElementById('login-screen').classList.add('hidden');
+                    document.getElementById('dashboard').classList.add('active');
+                    loadRecords();
+                })
+                .catch(() => {
+                    document.getElementById('login-error').textContent = 'Connection error';
+                    document.getElementById('login-error').style.display = 'block';
+                });
+        }
+
+        document.getElementById('password-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') login();
+        });
+
+        function logout() {
+            adminPassword = '';
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('dashboard').classList.remove('active');
+            document.getElementById('password-input').value = '';
+            document.getElementById('login-error').style.display = 'none';
+        }
+
+        async function loadRecords() {
+            const loading = document.getElementById('table-loading');
+            const table = document.getElementById('records-table');
+            const empty = document.getElementById('empty-state');
+            const body = document.getElementById('records-body');
+
+            loading.style.display = 'flex';
+            table.style.display = 'none';
+            empty.style.display = 'none';
+
+            try {
+                const res = await fetch(`/api/get-activations?password=${encodeURIComponent(adminPassword)}&limit=100`);
+                if (!res.ok) throw new Error('Failed');
+
+                const data = await res.json();
+                const records = data.records || [];
+
+                if (records.length === 0) {
+                    loading.style.display = 'none';
+                    empty.style.display = 'block';
+                    updateStats(records);
+                    return;
+                }
+
+                body.innerHTML = '';
+                records.forEach((r, i) => {
+                    const date = new Date(r.created_at);
+                    const dateStr = date.toLocaleString('en-GB', { timeZone: 'Africa/Cairo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${i + 1}</td>
+                        <td class="email-cell">${r.email}</td>
+                        <td class="code-cell">${r.code}</td>
+                        <td>${r.plan || '—'}</td>
+                        <td>${r.activation_type || '—'}</td>
+                        <td><span class="status-badge success">${r.status || 'success'}</span></td>
+                        <td>${dateStr}</td>
+                    `;
+                    body.appendChild(tr);
+                });
+
+                loading.style.display = 'none';
+                table.style.display = 'table';
+                updateStats(records);
+            } catch (err) {
+                loading.innerHTML = '❌ Failed to load records';
+            }
+        }
+
+        function updateStats(records) {
+            document.getElementById('stat-total').textContent = records.length;
+
+            const today = new Date().toDateString();
+            const todayCount = records.filter(r => new Date(r.created_at).toDateString() === today).length;
+            document.getElementById('stat-today').textContent = todayCount;
+
+            const uniqueEmails = new Set(records.map(r => r.email)).size;
+            document.getElementById('stat-emails').textContent = uniqueEmails;
+        }
+    </script>
+</body>
+</html>
