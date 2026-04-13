@@ -166,17 +166,6 @@
                         </div>
                     </div>
 
-                    <!-- Auth Method Toggle -->
-                    <div class="auth-toggle" id="auth-toggle">
-                        <button class="auth-toggle-btn active" data-method="session" id="auth-session-btn">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                            Session Token
-                        </button>
-                        <button class="auth-toggle-btn" data-method="email" id="auth-email-btn">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-                            Email Only
-                        </button>
-                    </div>
 
                     <!-- Session Token Input -->
                     <div class="input-group" id="session-input-group">
@@ -190,17 +179,6 @@
                         </p>
                     </div>
 
-                    <!-- Email Input -->
-                    <div class="input-group hidden" id="email-input-group">
-                        <label class="input-label" for="email-input">ChatGPT Email</label>
-                        <div class="input-wrapper">
-                            <input type="email" id="email-input" class="input" placeholder="you@example.com" spellcheck="false" autocomplete="email">
-                        </div>
-                        <p class="input-hint">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            Enter the email associated with your ChatGPT account. Used for subscription renewal.
-                        </p>
-                    </div>
 
                     <div class="alert hidden" id="session-alert"></div>
                     <div class="step-actions">

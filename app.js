@@ -32,12 +32,7 @@ const cdkAlert = $('#cdk-alert');
 const cdkInfo = $('#cdk-info');
 const nextStep2Btn = $('#next-step-2-btn');
 
-const authSessionBtn = $('#auth-session-btn');
-const authEmailBtn = $('#auth-email-btn');
-const sessionInputGroup = $('#session-input-group');
-const emailInputGroup = $('#email-input-group');
 const sessionInput = $('#session-input');
-const emailInput = $('#email-input');
 const sessionAlert = $('#session-alert');
 const activateBtn = $('#activate-btn');
 const backStep1Btn = $('#back-step-1-btn');
@@ -58,8 +53,9 @@ const restartBtn = $('#restart-btn');
 let currentStep = 1;
 let cdkCode = '';
 let cdkData = null;  // stores the check response
-let authMethod = 'session'; // 'session' or 'email'
+let authMethod = 'session';
 let pollingInterval = null;
+let pollingTimeout = null;
 
 // ─── Smart API Layer ───────────────────────────
 // Tries: 1) Direct API  2) Vercel proxy  3) CORS proxies
@@ -271,46 +267,21 @@ async function checkCDK() {
 }
 
 // ─── Step 2: Auth Method Toggle ────────────────
-function switchAuthMethod(method) {
-    authMethod = method;
-    authSessionBtn.classList.toggle('active', method === 'session');
-    authEmailBtn.classList.toggle('active', method === 'email');
-    sessionInputGroup.classList.toggle('hidden', method !== 'session');
-    emailInputGroup.classList.toggle('hidden', method !== 'email');
-    hideAlert(sessionAlert);
-}
-
 // ─── Step 2: Activate ──────────────────────────
 async function activate() {
+    const raw = sessionInput.value.trim();
+    if (!raw) {
+        showAlert(sessionAlert, 'error', 'Please paste your session token.');
+        return;
+    }
+
     let userPayload;
-
-    if (authMethod === 'session') {
-        const raw = sessionInput.value.trim();
-        if (!raw) {
-            showAlert(sessionAlert, 'error', 'Please paste your session token.');
-            return;
-        }
-
-        // Validate JSON
-        try {
-            const parsed = JSON.parse(raw);
-            if (!parsed.accessToken) {
-                showAlert(sessionAlert, 'error', 'Invalid session: missing "accessToken" field.');
-                return;
-            }
-            // Send as stringified JSON (API expects it)
-            userPayload = raw;
-        } catch {
-            showAlert(sessionAlert, 'error', 'Invalid JSON format. Please paste the full session response.');
-            return;
-        }
-    } else {
-        const email = emailInput.value.trim();
-        if (!email || !email.includes('@')) {
-            showAlert(sessionAlert, 'error', 'Please enter a valid email address.');
-            return;
-        }
-        userPayload = email;
+    try {
+        JSON.parse(raw);
+        userPayload = raw;
+    } catch {
+        showAlert(sessionAlert, 'error', 'Invalid JSON format. Please paste the full session response.');
+        return;
     }
 
     hideAlert(sessionAlert);
@@ -356,6 +327,8 @@ async function activate() {
 // ─── Step 3: Polling ───────────────────────────
 function startPolling(taskId) {
     let progress = 10;
+    let pollCount = 0;
+    const MAX_POLLS = 40; // ~2 minutes at 3s intervals
 
     statusProcessing.classList.remove('hidden');
     statusSuccess.classList.add('hidden');
@@ -364,8 +337,10 @@ function startPolling(taskId) {
     progressFill.style.width = '10%';
 
     pollingInterval = setInterval(async () => {
+        pollCount++;
         try {
             const data = await apiGet(`/cdk-activation/tasks/${taskId}`);
+            console.log(`[POLL #${pollCount}]`, JSON.stringify(data));
 
             // Update progress bar
             if (progress < 85) {
@@ -378,20 +353,57 @@ function startPolling(taskId) {
                 statusMessage.textContent = formatStatusMessage(data.status, data.message);
             }
 
-            if (data.pending === false) {
+            // Check completion: handle both boolean 'pending' and string 'status'
+            const isDone = data.pending === false 
+                || data.status === 'done' 
+                || data.status === 'subscription_sent'
+                || data.status === 'error'
+                || data.status === 'failed';
+
+            if (isDone) {
                 clearInterval(pollingInterval);
                 pollingInterval = null;
+                if (pollingTimeout) { clearTimeout(pollingTimeout); pollingTimeout = null; }
 
-                if (data.success) {
+                const isSuccess = data.success === true 
+                    || data.status === 'done' 
+                    || data.status === 'subscription_sent'
+                    || (data.message && data.message.toLowerCase().includes('success'));
+
+                if (isSuccess) {
                     progressFill.style.width = '100%';
                     setTimeout(() => showSuccess(data), 500);
                 } else {
                     showFailed(data.message || 'Activation failed.');
                 }
+                return;
             }
         } catch (err) {
-            // Don't stop polling on network hiccups
+            console.warn(`[POLL #${pollCount}] Error:`, err.message);
             statusMessage.textContent = 'Reconnecting...';
+        }
+
+        // Timeout: after MAX_POLLS, check code status directly
+        if (pollCount >= MAX_POLLS) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+            statusMessage.textContent = 'Checking final status...';
+            try {
+                const check = await apiPost('/cdk-activation/check', { code: cdkCode });
+                if (check.used === true) {
+                    progressFill.style.width = '100%';
+                    showSuccess({ 
+                        success: true, 
+                        message: 'Subscription activated successfully!',
+                        key: check.key,
+                        activation_type: 'new'
+                    });
+                } else {
+                    showFailed('Activation timed out. Please check your ChatGPT account or try again.');
+                }
+            } catch {
+                showFailed('Connection lost. Please check your ChatGPT account manually.');
+            }
         }
     }, 3000);
 }
@@ -429,16 +441,18 @@ function showSuccess(data) {
 }
 
 function logActivation(data) {
-    // Extract email from: activation response, session token, or email input
+    // Extract email from: activation response → session token → message text
     let email = data.key?.activated_email || '';
-    if (!email && authMethod === 'session') {
+    if (!email) {
         try {
             const session = JSON.parse(sessionInput.value.trim());
-            email = session.user?.email || '';
+            email = session.user?.email || session.email || '';
         } catch {}
     }
-    if (!email && authMethod === 'email') {
-        email = emailInput.value.trim();
+    if (!email && data.message) {
+        // Try to extract email from message like "Activated for name@example.com"
+        const emailMatch = data.message.match(/[\w.-]+@[\w.-]+\.\w+/);
+        if (emailMatch) email = emailMatch[0];
     }
 
     const payload = {
@@ -479,7 +493,6 @@ function resetAll() {
     cdkData = null;
     cdkInput.value = '';
     sessionInput.value = '';
-    emailInput.value = '';
 
     hideAlert(cdkAlert);
     hideAlert(sessionAlert);
@@ -491,7 +504,6 @@ function resetAll() {
     statusSuccess.classList.add('hidden');
     statusFailed.classList.add('hidden');
 
-    switchAuthMethod('session');
     goToStep(1);
 }
 
@@ -524,8 +536,7 @@ backStep1Btn.addEventListener('click', () => {
     }
 });
 
-authSessionBtn.addEventListener('click', () => switchAuthMethod('session'));
-authEmailBtn.addEventListener('click', () => switchAuthMethod('email'));
+
 
 activateBtn.addEventListener('click', activate);
 
