@@ -120,9 +120,9 @@ async function apiRequest(method, endpoint, body = null) {
         if (saved) attempts.push(saved);
     }
 
-    // Then add all methods: direct first, then Vercel proxy, then CORS proxies
-    attempts.push({ label: 'direct', url: `${DIRECT_API}${endpoint}`, isProxy: false });
+    // Then add all methods: proxy first (works on localhost + Vercel), then direct, then CORS
     attempts.push({ label: 'proxy', url: `${PROXY_PREFIX}${endpoint}`, isProxy: false });
+    attempts.push({ label: 'direct', url: `${DIRECT_API}${endpoint}`, isProxy: false });
     CORS_PROXIES.forEach((p, i) => {
         attempts.push({ label: `cors-${i}`, url: `${p}${encodeURIComponent(`${DIRECT_API}${endpoint}`)}`, isProxy: true });
     });
