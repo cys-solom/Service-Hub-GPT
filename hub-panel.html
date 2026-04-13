@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hub Panel — Service Hub</title>
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔒</text></svg>">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #080e1f;
+            --bg2: #0d1529;
+            --bg-card: rgba(13, 21, 41, 0.85);
+            --border: rgba(255,255,255,0.06);
+            --border2: rgba(77,166,255,0.1);
+            --text: #f0f0f5;
+            --text2: #8b8b9e;
+            --text3: #5e5e72;
+            --accent: #4DA6FF;
+            --accent-d: #2B8AE6;
+            --accent2: #FFA726;
+            --accent-glow: rgba(77,166,255,0.15);
+            --error: #ef4444;
+            --font: 'Inter', -apple-system, sans-serif;
+            --radius: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+        }
+
+        /* ─── Animated Background ─── */
+        .bg-glow { position: fixed; border-radius: 50%; filter: blur(120px); z-index: 0; pointer-events: none; animation: glowFloat 12s ease-in-out infinite; }
+        .bg-glow-1 { width: 400px; height: 400px; background: rgba(77,166,255,0.06); top: -5%; right: 10%; }
+        .bg-glow-2 { width: 300px; height: 300px; background: rgba(255,167,38,0.04); bottom: 10%; left: -5%; animation-delay: -6s; }
+        @keyframes glowFloat { 0%, 100% { transform: translate(0,0) scale(1); } 50% { transform: translate(20px,-15px) scale(1.05); } }
+
+        /* ─── Login Screen ─── */
+        .login-screen {
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh; padding: 20px; position: relative; z-index: 1;
+        }
+        .login-screen.hidden { display: none; }
+
+        .login-card {
+            background: var(--bg-card); border: 1px solid var(--border2);
+            border-radius: var(--radius-xl); padding: 44px 36px; width: 100%; max-width: 420px;
+            backdrop-filter: blur(20px); box-shadow: 0 12px 48px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.03);
+            animation: fadeIn 0.5s ease;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        .login-logo {
+            width: 56px; height: 56px; border-radius: 16px;
+            background: var(--accent-glow); border: 1px solid rgba(77,166,255,0.2);
+            display: flex; align-items: center; justify-content: center;
+            margin: 0 auto 20px; font-size: 1.5rem;
+        }
+
+        .login-card h1 { font-size: 1.3rem; font-weight: 700; text-align: center; margin-bottom: 6px; }
+        .login-card h1 span { color: var(--accent); }
+        .login-card .login-sub { color: var(--text2); font-size: 0.85rem; text-align: center; margin-bottom: 28px; }
+
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 0.75rem; font-weight: 600; color: var(--text2); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+        .form-input {
+            width: 100%; padding: 13px 16px;
+            background: rgba(255,255,255,0.04); border: 1.5px solid var(--border);
+            border-radius: var(--radius); color: var(--text);
+            font-family: var(--font); font-size: 0.9rem; outline: none;
+            transition: 0.25s ease;
+        }
+        .form-input:focus { border-color: rgba(77,166,255,0.5); box-shadow: 0 0 0 3px rgba(77,166,255,0.08); }
+        .form-input::placeholder { color: var(--text3); }
+
+        .login-btn {
+            width: 100%; padding: 14px; margin-top: 8px;
+            background: linear-gradient(135deg, var(--accent-d), var(--accent));
+            color: #fff; border: none; border-radius: var(--radius);
+            font-family: var(--font); font-size: 0.9rem; font-weight: 600;
+            cursor: pointer; transition: 0.25s ease; position: relative; overflow: hidden;
+        }
+        .login-btn:hover { box-shadow: 0 6px 24px rgba(77,166,255,0.4); transform: translateY(-1px); }
+        .login-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        .login-error {
+            padding: 12px 16px; border-radius: var(--radius); margin-bottom: 16px;
+            background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);
+            color: #fca5a5; font-size: 0.82rem; display: none; animation: fadeIn 0.3s ease;
+        }
+
+        /* ─── Dashboard ─── */
+        .dashboard { display: none; position: relative; z-index: 1; }
+        .dashboard.active { display: block; animation: fadeIn 0.4s ease; }
+
+        .dash-header {
+            padding: 16px 24px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+            backdrop-filter: blur(20px); background: rgba(8,14,31,0.85);
+            position: sticky; top: 0; z-index: 10;
+        }
+        .dash-header-left { display: flex; align-items: center; gap: 12px; }
+        .dash-header h1 { font-size: 1.05rem; font-weight: 700; }
+        .dash-header h1 span { color: var(--accent); }
+
+        .user-badge {
+            font-size: 0.72rem; color: var(--accent2); background: rgba(255,167,38,0.1);
+            border: 1px solid rgba(255,167,38,0.2); padding: 5px 12px; border-radius: 20px; font-weight: 600;
+        }
+
+        .dash-logout {
+            background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+            color: var(--text2); padding: 8px 16px; border-radius: 8px;
+            font-family: var(--font); font-size: 0.78rem; cursor: pointer; transition: 0.2s;
+        }
+        .dash-logout:hover { color: var(--error); border-color: rgba(239,68,68,0.3); }
+
+        .dash-content { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+        /* Stats */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 28px; }
+
+        .stat-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); padding: 22px 20px;
+            backdrop-filter: blur(12px); transition: 0.25s ease;
+        }
+        .stat-card:hover { border-color: var(--border2); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+
+        .stat-icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; font-size: 1.1rem; }
+        .stat-icon.blue { background: rgba(77,166,255,0.1); }
+        .stat-icon.orange { background: rgba(255,167,38,0.1); }
+        .stat-icon.green { background: rgba(16,185,129,0.1); }
+
+        .stat-label { font-size: 0.72rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+        .stat-value { font-size: 2rem; font-weight: 800; margin-top: 4px; letter-spacing: -0.02em; }
+        .stat-value.blue { color: var(--accent); }
+        .stat-value.orange { color: var(--accent2); }
+        .stat-value.green { color: #10B981; }
+
+        /* Table */
+        .table-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); overflow: hidden; backdrop-filter: blur(12px);
+        }
+
+        .table-header {
+            padding: 16px 20px; border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+        }
+        .table-header h2 { font-size: 1rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+
+        .table-actions { display: flex; gap: 8px; }
+        .table-btn {
+            background: rgba(77,166,255,0.1); border: 1px solid rgba(77,166,255,0.2);
+            color: var(--accent); padding: 8px 16px; border-radius: 8px;
+            font-family: var(--font); font-size: 0.75rem; font-weight: 600;
+            cursor: pointer; transition: 0.2s;
+        }
+        .table-btn:hover { background: rgba(77,166,255,0.2); }
+
+        .table-wrapper { overflow-x: auto; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        th {
+            text-align: left; padding: 12px 16px; background: rgba(255,255,255,0.02);
+            color: var(--text3); font-weight: 600; font-size: 0.7rem;
+            text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); white-space: nowrap;
+        }
+        td { padding: 14px 16px; border-bottom: 1px solid var(--border); color: var(--text2); white-space: nowrap; transition: 0.15s; }
+        tr:hover td { background: rgba(77,166,255,0.03); }
+
+        .email-cell { color: var(--accent); font-weight: 500; }
+        .code-cell { font-family: 'Courier New', monospace; color: var(--accent2); font-size: 0.78rem; letter-spacing: 0.02em; }
+        .date-cell { font-size: 0.78rem; color: var(--text3); }
+
+        .badge {
+            display: inline-block; padding: 4px 12px; border-radius: 20px;
+            font-size: 0.68rem; font-weight: 600; letter-spacing: 0.02em;
+        }
+        .badge-success { background: rgba(77,166,255,0.1); color: var(--accent); border: 1px solid rgba(77,166,255,0.15); }
+        .badge-plan { background: rgba(255,167,38,0.1); color: var(--accent2); border: 1px solid rgba(255,167,38,0.15); }
+
+        .empty-state { padding: 60px 20px; text-align: center; color: var(--text3); }
+        .empty-state p { font-size: 0.88rem; margin-top: 12px; }
+
+        .loading-state { display: flex; align-items: center; justify-content: center; padding: 50px; color: var(--text3); gap: 10px; font-size: 0.85rem; }
+        .spin { animation: spin 0.8s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .dash-content { padding: 16px; }
+            .stats-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+            .stat-card { padding: 16px; }
+            .stat-value { font-size: 1.5rem; }
+            .login-card { padding: 32px 24px; }
+            .dash-header { padding: 12px 16px; }
+            .table-header { padding: 12px 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+
+    <!-- ─── Login ─── -->
+    <div class="login-screen" id="login-screen">
+        <div class="login-card">
+            <div class="login-logo">🛡️</div>
+            <h1>Service<span>Hub</span> Admin</h1>
+            <p class="login-sub">Sign in to access the admin dashboard</p>
+
+            <div class="login-error" id="login-error"></div>
+
+            <div class="form-group">
+                <label class="form-label" for="email-input">Email</label>
+                <input type="email" id="email-input" class="form-input" placeholder="admin@example.com" autocomplete="email">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="pwd-input">Password</label>
+                <input type="password" id="pwd-input" class="form-input" placeholder="••••••••" autocomplete="current-password">
+            </div>
+            <button class="login-btn" id="login-btn">Sign In</button>
+        </div>
+    </div>
+
+    <!-- ─── Dashboard ─── -->
+    <div class="dashboard" id="dashboard">
+        <div class="dash-header">
+            <div class="dash-header-left">
+                <h1>⚡ Service<span>Hub</span></h1>
+                <span class="user-badge" id="user-email">admin</span>
+            </div>
+            <button class="dash-logout" id="logout-btn">Logout</button>
+        </div>
+
+        <div class="dash-content">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon blue">📊</div>
+                    <div class="stat-label">Total Activations</div>
+                    <div class="stat-value blue" id="stat-total">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange">📅</div>
+                    <div class="stat-label">Today</div>
+                    <div class="stat-value orange" id="stat-today">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green">👥</div>
+                    <div class="stat-label">Unique Emails</div>
+                    <div class="stat-value green" id="stat-emails">—</div>
+                </div>
+            </div>
+
+            <div class="table-card">
+                <div class="table-header">
+                    <h2>📋 Activation Records</h2>
+                    <div class="table-actions">
+                        <button class="table-btn" id="refresh-btn">↻ Refresh</button>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <div class="loading-state" id="table-loading">
+                        <svg class="spin" width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="30 70" stroke-linecap="round"/></svg>
+                        Loading records...
+                    </div>
+                    <table id="records-table" style="display:none">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Email</th>
+                                <th>Hub-Code</th>
+                                <th>Plan</th>
+                                <th>Type</th>
+                                <th>Status</th>
+                                <th>Date & Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="records-body"></tbody>
+                    </table>
+                    <div class="empty-state" id="empty-state" style="display:none">
+                        <div style="font-size:2.5rem;opacity:0.3">📭</div>
+                        <p>No activation records yet.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ─── Supabase Init ───
+        // These will be set from environment or directly here
+        const SUPA_URL = window.__SUPA_URL__ || localStorage.getItem('supa_url') || '';
+        const SUPA_KEY = window.__SUPA_KEY__ || localStorage.getItem('supa_key') || '';
+
+        let supabase = null;
+        let currentUser = null;
+
+        // Try to get Supabase config from the server
+        async function initSupabase() {
+            // First check if config is available via API
+            try {
+                const res = await fetch('/api/supabase-config');
+                if (res.ok) {
+                    const config = await res.json();
+                    supabase = window.supabase.createClient(config.url, config.key);
+                    return true;
+                }
+            } catch {}
+
+            // Fallback: prompt if no config
+            if (!SUPA_URL || !SUPA_KEY) {
+                const url = prompt('Enter Supabase URL:');
+                const key = prompt('Enter Supabase Anon Key:');
+                if (url && key) {
+                    localStorage.setItem('supa_url', url);
+                    localStorage.setItem('supa_key', key);
+                    supabase = window.supabase.createClient(url, key);
+                    return true;
+                }
+                return false;
+            }
+
+            supabase = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+            return true;
+        }
+
+        // ─── Auth ───
+        async function login() {
+            const email = document.getElementById('email-input').value.trim();
+            const pwd = document.getElementById('pwd-input').value;
+            const errEl = document.getElementById('login-error');
+            const btn = document.getElementById('login-btn');
+
+            if (!email || !pwd) {
+                errEl.textContent = 'Please enter email and password.';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Signing in...';
+            errEl.style.display = 'none';
+
+            if (!supabase) {
+                const ok = await initSupabase();
+                if (!ok) {
+                    errEl.textContent = 'Supabase not configured.';
+                    errEl.style.display = 'block';
+                    btn.disabled = false;
+                    btn.textContent = 'Sign In';
+                    return;
+                }
+            }
+
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password: pwd });
+
+            if (error) {
+                errEl.textContent = error.message || 'Invalid credentials.';
+                errEl.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = 'Sign In';
+                return;
+            }
+
+            currentUser = data.user;
+            showDashboard();
+        }
+
+        function showDashboard() {
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('dashboard').classList.add('active');
+            document.getElementById('user-email').textContent = currentUser?.email || 'Admin';
+            loadRecords();
+        }
+
+        async function logout() {
+            if (supabase) await supabase.auth.signOut();
+            currentUser = null;
+            document.getElementById('login-screen').classList.remove('hidden');
+            document.getElementById('dashboard').classList.remove('active');
+            document.getElementById('pwd-input').value = '';
+            document.getElementById('login-error').style.display = 'none';
+            document.getElementById('login-btn').disabled = false;
+            document.getElementById('login-btn').textContent = 'Sign In';
+        }
+
+        // ─── Data ───
+        async function loadRecords() {
+            const loading = document.getElementById('table-loading');
+            const table = document.getElementById('records-table');
+            const empty = document.getElementById('empty-state');
+            const body = document.getElementById('records-body');
+
+            loading.style.display = 'flex';
+            table.style.display = 'none';
+            empty.style.display = 'none';
+
+            try {
+                const { data: records, error } = await supabase
+                    .from('activations')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                    .limit(200);
+
+                if (error) throw error;
+
+                if (!records || records.length === 0) {
+                    loading.style.display = 'none';
+                    empty.style.display = 'block';
+                    updateStats([]);
+                    return;
+                }
+
+                body.innerHTML = '';
+                records.forEach((r, i) => {
+                    const date = new Date(r.created_at);
+                    const dateStr = date.toLocaleString('en-GB', {
+                        timeZone: 'Africa/Cairo',
+                        day: '2-digit', month: '2-digit', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit'
+                    });
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="color:var(--text3)">${i + 1}</td>
+                        <td class="email-cell">${escapeHtml(r.email)}</td>
+                        <td class="code-cell">${escapeHtml(r.code)}</td>
+                        <td><span class="badge badge-plan">${escapeHtml(r.plan || '—')}</span></td>
+                        <td>${escapeHtml(r.activation_type || '—')}</td>
+                        <td><span class="badge badge-success">${escapeHtml(r.status || 'success')}</span></td>
+                        <td class="date-cell">${dateStr}</td>
+                    `;
+                    body.appendChild(tr);
+                });
+
+                loading.style.display = 'none';
+                table.style.display = 'table';
+                updateStats(records);
+            } catch (err) {
+                console.error('Load error:', err);
+                loading.innerHTML = '❌ Failed to load: ' + (err.message || 'Unknown error');
+            }
+        }
+
+        function updateStats(records) {
+            document.getElementById('stat-total').textContent = records.length;
+            const today = new Date().toDateString();
+            document.getElementById('stat-today').textContent = records.filter(r => new Date(r.created_at).toDateString() === today).length;
+            document.getElementById('stat-emails').textContent = new Set(records.map(r => r.email)).size;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // ─── Events ───
+        document.getElementById('login-btn').addEventListener('click', login);
+        document.getElementById('pwd-input').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+        document.getElementById('email-input').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('pwd-input').focus(); });
+        document.getElementById('logout-btn').addEventListener('click', logout);
+        document.getElementById('refresh-btn').addEventListener('click', loadRecords);
+
+        // ─── Auto-login if session exists ───
+        window.addEventListener('DOMContentLoaded', async () => {
+            const ok = await initSupabase();
+            if (!ok) return;
+
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+                currentUser = session.user;
+                showDashboard();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
--- Run this SQL in Supabase SQL Editor to create the activations table
+-- Run this SQL in Supabase SQL Editor
 
+-- 1. Create the activations table
 CREATE TABLE IF NOT EXISTS activations (
     id BIGSERIAL PRIMARY KEY,
     email TEXT NOT NULL,
@@ -10,12 +11,22 @@ CREATE TABLE IF NOT EXISTS activations (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Enable Row Level Security
+-- 2. Enable Row Level Security
 ALTER TABLE activations ENABLE ROW LEVEL SECURITY;
 
--- Allow the anon key to insert and select (for our serverless functions)
-CREATE POLICY "Allow insert" ON activations FOR INSERT WITH CHECK (true);
-CREATE POLICY "Allow select" ON activations FOR SELECT USING (true);
+-- 3. RLS Policies
+-- Anyone can INSERT (for the serverless function using anon key)
+CREATE POLICY "Allow public insert" ON activations
+    FOR INSERT WITH CHECK (true);
 
--- Index for faster queries
-CREATE INDEX idx_activations_created_at ON activations (created_at DESC);
+-- Only authenticated users can SELECT (admin must login)
+CREATE POLICY "Authenticated users can read" ON activations
+    FOR SELECT USING (auth.role() = 'authenticated');
+
+-- 4. Index for faster queries
+CREATE INDEX IF NOT EXISTS idx_activations_created_at ON activations (created_at DESC);
+
+-- 5. Create admin user (change email and password!)
+-- Go to Supabase Dashboard → Authentication → Users → "Add User"
+-- Email: your-admin@email.com
+-- Password: your-secure-password
