@@ -62,22 +62,44 @@ let authMethod = 'session'; // 'session' or 'email'
 let pollingInterval = null;
 
 // ─── Smart API Layer ───────────────────────────
-// Tries: 1) Vercel proxy  2) Direct API  3) CORS proxies
+// Tries: 1) Direct API  2) Vercel proxy  3) CORS proxies
 // Remembers which method works for subsequent calls
 
-let workingMethod = null; // 'proxy', 'direct', 'cors-0', 'cors-1', etc.
+let workingMethod = null; // 'direct', 'proxy', 'cors-0', 'cors-1', etc.
 
-async function tryFetch(url, options) {
+// Known API response fields — used to validate real API responses vs proxy errors
+const API_KNOWN_FIELDS = ['used', 'status', 'app_name', 'app_product_name', 'key', 'task_id', 'pending', 'success', 'activation_type', 'code'];
+
+function isRealApiResponse(json) {
+    if (!json || typeof json !== 'object') return false;
+    // If it has any known API field, it's a real response
+    if (API_KNOWN_FIELDS.some(f => f in json)) return true;
+    // If it's an array (batch check response), it's real
+    if (Array.isArray(json)) return true;
+    // If it has "message" with known API error text, it's real
+    if (json.message && (json.message.includes('not found') || json.message.includes('failed'))) return true;
+    return false;
+}
+
+async function fetchFromUrl(url, options, isProxy = false) {
     const res = await fetch(url, options);
-    if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        let json;
-        try { json = JSON.parse(text); } catch { json = null; }
-        // API might return error messages with non-200 status — still valid JSON
-        if (json) return json;
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const text = await res.text();
+    let json;
+    try { json = JSON.parse(text); } catch { json = null; }
+
+    if (isProxy) {
+        // For CORS proxies: ONLY accept 200 OK with valid API JSON
+        if (!res.ok) throw new Error(`Proxy returned HTTP ${res.status}`);
+        if (!json) throw new Error('Proxy returned non-JSON');
+        if (!isRealApiResponse(json)) throw new Error(`Proxy error: ${json.message || text.substring(0, 100)}`);
+        return json;
     }
-    return await res.json();
+
+    // For direct/Vercel proxy: accept any JSON response (even error codes)
+    if (json && isRealApiResponse(json)) return json;
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    if (!json) throw new Error('Non-JSON response');
+    return json;
 }
 
 async function apiRequest(method, endpoint, body = null) {
@@ -93,20 +115,16 @@ async function apiRequest(method, endpoint, body = null) {
     const attempts = [];
 
     // If we already know what works, try that first
-    if (workingMethod === 'proxy') {
-        attempts.push({ label: 'proxy', url: `${PROXY_PREFIX}${endpoint}` });
-    } else if (workingMethod === 'direct') {
-        attempts.push({ label: 'direct', url: `${DIRECT_API}${endpoint}` });
-    } else if (workingMethod?.startsWith('cors-')) {
-        const idx = parseInt(workingMethod.split('-')[1]);
-        attempts.push({ label: workingMethod, url: `${CORS_PROXIES[idx]}${encodeURIComponent(`${DIRECT_API}${endpoint}`)}` });
+    if (workingMethod) {
+        const saved = buildAttempt(workingMethod, endpoint);
+        if (saved) attempts.push(saved);
     }
 
-    // Then add all methods as fallback
-    attempts.push({ label: 'proxy', url: `${PROXY_PREFIX}${endpoint}` });
-    attempts.push({ label: 'direct', url: `${DIRECT_API}${endpoint}` });
-    CORS_PROXIES.forEach((proxy, i) => {
-        attempts.push({ label: `cors-${i}`, url: `${proxy}${encodeURIComponent(`${DIRECT_API}${endpoint}`)}` });
+    // Then add all methods: direct first, then Vercel proxy, then CORS proxies
+    attempts.push({ label: 'direct', url: `${DIRECT_API}${endpoint}`, isProxy: false });
+    attempts.push({ label: 'proxy', url: `${PROXY_PREFIX}${endpoint}`, isProxy: false });
+    CORS_PROXIES.forEach((p, i) => {
+        attempts.push({ label: `cors-${i}`, url: `${p}${encodeURIComponent(`${DIRECT_API}${endpoint}`)}`, isProxy: true });
     });
 
     // Deduplicate by label
@@ -120,18 +138,28 @@ async function apiRequest(method, endpoint, body = null) {
     let lastError = null;
     for (const attempt of uniqueAttempts) {
         try {
-            console.log(`[API] Trying ${attempt.label}: ${attempt.url}`);
-            const data = await tryFetch(attempt.url, fetchOpts);
+            console.log(`[API] Trying ${attempt.label}...`);
+            const data = await fetchFromUrl(attempt.url, fetchOpts, attempt.isProxy);
             workingMethod = attempt.label;
             console.log(`[API] ✓ Success via ${attempt.label}`);
             return data;
         } catch (err) {
-            console.warn(`[API] ✗ ${attempt.label} failed:`, err.message);
+            console.warn(`[API] ✗ ${attempt.label}:`, err.message);
             lastError = err;
         }
     }
 
-    throw lastError || new Error('All connection methods failed. Please try again.');
+    throw lastError || new Error('Unable to connect to the server. Please try again.');
+}
+
+function buildAttempt(label, ep) {
+    if (label === 'direct') return { label, url: `${DIRECT_API}${ep}`, isProxy: false };
+    if (label === 'proxy') return { label, url: `${PROXY_PREFIX}${ep}`, isProxy: false };
+    if (label.startsWith('cors-')) {
+        const idx = parseInt(label.split('-')[1]);
+        return { label, url: `${CORS_PROXIES[idx]}${encodeURIComponent(`${DIRECT_API}${ep}`)}`, isProxy: true };
+    }
+    return null;
 }
 
 function apiPost(endpoint, body) {
