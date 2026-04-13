@@ -272,10 +272,58 @@ function decodeJWT(token) {
     try {
         const parts = token.split('.');
         if (parts.length !== 3) return null;
-        // Base64url decode the payload
         const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
         return JSON.parse(atob(payload));
     } catch { return null; }
+}
+
+function detectPlanFromJWT(jwt) {
+    if (!jwt) return { plan: 'Free', isWorkspace: false };
+
+    let plan = 'Free';
+    let isWorkspace = false;
+
+    // Check OpenAI profile/auth claims
+    const profile = jwt['https://api.openai.com/profile'] || {};
+    const auth = jwt['https://api.openai.com/auth'] || {};
+
+    // Detect workspace/team/enterprise
+    if (auth.organization_id || auth.org_id || auth.workspace_id) {
+        isWorkspace = true;
+    }
+    if (profile.organization_id || profile.org_id) {
+        isWorkspace = true;
+    }
+
+    // Check audience for workspace indicators
+    const aud = Array.isArray(jwt.aud) ? jwt.aud : [jwt.aud || ''];
+    if (aud.some(a => a && (a.includes('workspace') || a.includes('enterprise') || a.includes('team')))) {
+        isWorkspace = true;
+    }
+
+    // Check scopes for plan hints
+    const scopes = jwt.scope || '';
+    if (scopes.includes('model.request.gpt-4')) {
+        plan = 'Plus';
+    }
+    // More specific plan detection from claims
+    if (auth.plan) plan = auth.plan;
+    if (profile.plan) plan = profile.plan;
+
+    // Normalize plan name
+    const planLower = plan.toLowerCase();
+    if (planLower.includes('team') || planLower.includes('enterprise')) {
+        isWorkspace = true;
+        plan = 'Team / Enterprise';
+    } else if (planLower.includes('plus')) {
+        plan = 'Plus';
+    } else if (planLower.includes('pro')) {
+        plan = 'Pro';
+    } else if (planLower === 'free' || planLower === '') {
+        plan = 'Free';
+    }
+
+    return { plan, isWorkspace };
 }
 
 function validateAndShowToken(raw) {
@@ -303,40 +351,47 @@ function validateAndShowToken(raw) {
         return { valid: false, error: 'Missing user email. The session token appears incomplete or corrupted.' };
     }
 
-    // 3. Decode JWT to get plan info
+    // 3. Decode JWT
     const jwt = decodeJWT(session.accessToken);
-    let currentPlan = 'Free';
 
     if (jwt) {
-        // Check for token expiration
+        // Check expiration
         if (jwt.exp && jwt.exp * 1000 < Date.now()) {
             return { valid: false, error: 'Session token has expired. Please get a fresh token from chatgpt.com/api/auth/session' };
         }
-
-        // Extract plan from JWT claims
-        // OpenAI uses various claim formats
-        if (jwt['https://api.openai.com/profile']) {
-            const profile = jwt['https://api.openai.com/profile'];
-            if (profile.plan) currentPlan = profile.plan;
-        }
-        if (jwt['https://api.openai.com/auth']) {
-            const auth = jwt['https://api.openai.com/auth'];
-            if (auth.plan) currentPlan = auth.plan;
-        }
-
-        // Check scopes for plan hints
-        const scopes = jwt.scope || '';
-        if (scopes.includes('model.request.gpt-4')) {
-            currentPlan = 'Plus / Team';
-        } else if (scopes.includes('model.request')) {
-            currentPlan = 'Free';
-        }
     }
 
-    // 4. Show account info
+    // 4. Detect plan and workspace
+    const { plan: currentPlan, isWorkspace } = detectPlanFromJWT(jwt);
+
+    // Also check session-level workspace indicators
+    const userGroups = session.user?.groups || [];
+    const hasWorkspaceGroup = userGroups.some(g => 
+        typeof g === 'string' && (g.includes('team') || g.includes('workspace') || g.includes('enterprise'))
+    );
+
+    if (isWorkspace || hasWorkspaceGroup) {
+        return { 
+            valid: false, 
+            error: '⚠️ Workspace / Team accounts are not supported. Please use a personal ChatGPT account for activation.' 
+        };
+    }
+
+    // 5. Show account info
     accountEmail.textContent = session.user.email;
     accountName.textContent = session.user.name || session.user.email.split('@')[0];
     accountPlan.textContent = currentPlan;
+
+    // Color the plan badge
+    const planEl = accountPlan;
+    if (currentPlan === 'Plus') {
+        planEl.style.color = 'var(--accent2)';
+    } else if (currentPlan === 'Pro') {
+        planEl.style.color = '#a855f7';
+    } else {
+        planEl.style.color = 'var(--text2)';
+    }
+
     accountInfo.classList.remove('hidden');
 
     return { valid: true, session, email: session.user.email, plan: currentPlan };
@@ -357,6 +412,46 @@ async function activate() {
         return;
     }
 
+    // ─── Plan Compatibility Checks ───
+    const currentPlan = tokenResult.plan;
+    const codePlan = (cdkData?.key?.plan || cdkData?.app_name || '').toLowerCase();
+
+    // Block: Pro code + Plus account (won't work)
+    if (codePlan.includes('pro') && currentPlan === 'Plus') {
+        showAlert(sessionAlert, 'error', 
+            '⛔ Cannot activate a Pro subscription while Plus is active. Please wait until your Plus subscription expires, or use a different account.');
+        return;
+    }
+
+    // Block: Plus code + Pro account (downgrade not supported)
+    if (codePlan.includes('plus') && currentPlan === 'Pro') {
+        showAlert(sessionAlert, 'error', 
+            '⛔ Cannot activate a Plus subscription while Pro is active. Please wait until your Pro subscription expires, or use a different account.');
+        return;
+    }
+
+    // Warn: Plus code + Plus account (cycle will restart)
+    if (codePlan.includes('plus') && currentPlan === 'Plus') {
+        const proceed = confirm(
+            '⚠️ Your account already has an active Plus subscription.\n\n' +
+            'Activating this Hub Code will start a NEW subscription cycle.\n' +
+            'The remaining days of your current cycle will be lost.\n\n' +
+            'Do you want to continue?'
+        );
+        if (!proceed) return;
+    }
+
+    // Warn: Pro code + Pro account (cycle will restart)
+    if (codePlan.includes('pro') && currentPlan === 'Pro') {
+        const proceed = confirm(
+            '⚠️ Your account already has an active Pro subscription.\n\n' +
+            'Activating this Hub Code will start a NEW subscription cycle.\n' +
+            'The remaining days of your current cycle will be lost.\n\n' +
+            'Do you want to continue?'
+        );
+        if (!proceed) return;
+    }
+
     hideAlert(sessionAlert);
     setLoading(activateBtn, true);
 
@@ -374,12 +469,16 @@ async function activate() {
             let userMsg = data.message;
             
             // Translate common API errors
-            if (msg.includes('session') && msg.includes('invalid')) {
+            if (msg.includes('session') && (msg.includes('invalid') || msg.includes('expired'))) {
                 userMsg = 'Session token is invalid or expired. Please get a fresh token from chatgpt.com/api/auth/session';
+            } else if (msg.includes('workspace') || msg.includes('team account') || msg.includes('organization')) {
+                userMsg = '⚠️ Workspace / Team accounts are not supported. Please use a personal ChatGPT account.';
             } else if (msg.includes('already') || msg.includes('activated') || msg.includes('used')) {
-                userMsg = 'This code has already been used for activation.';
-            } else if (msg.includes('not found') || msg.includes('invalid code')) {
-                userMsg = 'Invalid CDK code. Please check and try again.';
+                userMsg = 'This Hub Code has already been activated.';
+            } else if (msg.includes('not found') || msg.includes('invalid')) {
+                userMsg = 'Invalid Hub Code. Please check and try again.';
+            } else if (msg.includes('failed') || msg.includes('error')) {
+                userMsg = 'Activation failed: ' + data.message;
             }
             
             showAlert(sessionAlert, 'error', userMsg);
