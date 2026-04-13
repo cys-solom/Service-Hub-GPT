@@ -221,7 +221,7 @@ function setLoading(btn, loading) {
 async function checkCDK() {
     const code = cdkInput.value.trim();
     if (!code) {
-        showAlert(cdkAlert, 'error', 'Please enter a CDK code.');
+        showAlert(cdkAlert, 'error', 'Please enter a Hub-Code.');
         return;
     }
 
@@ -235,7 +235,7 @@ async function checkCDK() {
 
         if (data.message) {
             // Error - code not found
-            showAlert(cdkAlert, 'error', data.message === 'cdk not found' ? 'CDK code not found. Please check and try again.' : data.message);
+            showAlert(cdkAlert, 'error', data.message === 'cdk not found' ? 'Hub-Code not found. Please check and try again.' : data.message);
             setLoading(checkBtn, false);
             return;
         }
